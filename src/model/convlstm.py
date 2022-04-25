@@ -20,44 +20,45 @@ import torch.nn.functional as F
 
 
 class ConvLSTM_Unit(nn.Module):
-    def __init__(self, input_dim, hidden_dim, kernel_size, padding, bias=False):
+    def __init__(self, input_dim, hidden_dim, kernel_size, padding, dilation, bias):
         super(ConvLSTM_Unit, self).__init__()
 
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.kernel_size = kernel_size
         self.padding = padding
+        self.dilation = dilation
         self.bias = bias
 
         self.Wxi = nn.Conv2d(in_channels=self.input_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
-                             padding=self.padding, bias=self.bias)
+                             padding=self.padding, dilation=self.dilation, bias=self.bias)
         self.Whi = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
-                             padding=self.padding, bias=self.bias)
+                             padding=self.padding, dilation=self.dilation, bias=self.bias)
 
         self.Wxf = nn.Conv2d(in_channels=self.input_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
-                             padding=self.padding, bias=self.bias)
+                             padding=self.padding, dilation=self.dilation, bias=self.bias)
         self.Whf = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
-                             padding=self.padding, bias=self.bias)
+                             padding=self.padding, dilation=self.dilation, bias=self.bias)
 
         self.Wxo = nn.Conv2d(in_channels=self.input_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
-                             padding=self.padding, bias=self.bias)
+                             padding=self.padding, dilation=self.dilation, bias=self.bias)
         self.Who = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
-                             padding=self.padding, bias=self.bias)
+                             padding=self.padding, dilation=self.dilation, bias=self.bias)
 
         self.Wxc = nn.Conv2d(in_channels=self.input_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
-                             padding=self.padding, bias=self.bias)
+                             padding=self.padding, dilation=self.dilation, bias=self.bias)
         self.Whc = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
-                             padding=self.padding, bias=self.bias)
+                             padding=self.padding, dilation=self.dilation, bias=self.bias)
 
     def forward(self, input, hidden_state, current_state):
         i = torch.sigmoid(self.Wxi(input) + self.Whi(hidden_state))
         f = torch.sigmoid(self.Wxf(input) + self.Whf(hidden_state))
         o = torch.sigmoid(self.Wxo(input) + self.Who(hidden_state))
+        print(f.shape, current_state.shape)
         c = f * current_state + i * torch.tanh(self.Wxc(input) + self.Whc(hidden_state))
         h = o * torch.tanh(c)
         return h, c
 
-    # initializes first hidden state with all zeroes
     def init_hidden(self, batch_size, image_size):
         height, width = image_size
         return (torch.zeros(batch_size, self.hidden_dim, height, width),
@@ -67,11 +68,11 @@ class ConvLSTM_Unit(nn.Module):
 class ConvLSTM(nn.Module):
 
     """
-    The ConvLSTM Module with seq_len units
+        The ConvLSTM Module with seq_len units
 
-    """
+        """
 
-    def __init__(self, input_dim, hidden_dim, kernel_size, padding, num_layers, bias, device):
+    def __init__(self, input_dim, hidden_dim, kernel_size, padding, num_layers, batch_first, dilation, bias, device):
         super(ConvLSTM, self).__init__()
 
         self.input_dim = input_dim
@@ -79,8 +80,11 @@ class ConvLSTM(nn.Module):
         self.kernel_size = kernel_size
         self.padding = padding
         self.num_layers = num_layers
+        self.batch_first = batch_first
+        self.dilation = dilation
         self.bias = bias
         self.device = device
+
 
         layer_list = []
 
@@ -88,7 +92,7 @@ class ConvLSTM(nn.Module):
             current_input_dim = self.input_dim if i == 0 else self.hidden_dim
 
             layer_list.append(
-                ConvLSTM_Unit(input_dim=current_input_dim, hidden_dim=self.hidden_dim, kernel_size=self.kernel_size, padding=self.padding,
+                ConvLSTM_Unit(input_dim=current_input_dim, hidden_dim=self.hidden_dim, kernel_size=self.kernel_size, padding=self.padding, dilation=self.dilation,
                               bias=self.bias))
 
         self.layer_list = nn.ModuleList(layer_list)
@@ -105,6 +109,7 @@ class ConvLSTM(nn.Module):
 
         current_input = input
 
+        internal_list = []
         last_layer_states = []
         outputs = []
         seq_len = current_input.size(1)
@@ -120,6 +125,7 @@ class ConvLSTM(nn.Module):
                 sequence_t_list.append(h)
 
             layer_output = torch.stack(sequence_t_list, dim=1)
+            current_layer_input = layer_output
             outputs.append(layer_output)
             last_layer_states.append((h, c))
 

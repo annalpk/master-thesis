@@ -1,3 +1,7 @@
 src/results
 .idea
 src/*.pth
+*.ipynb
+.ipynb
+.ipynb_*
+__pycache__

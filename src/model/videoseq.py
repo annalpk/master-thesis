@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-from SPP import ASPP
-from convlstm import ConvLSTM
+from model.SPP import ASPP_simple, ASPP
+from model.convlstm import ConvLSTM
 
 
 class Bottleneck(nn.Module):
@@ -47,18 +47,18 @@ class Bottleneck(nn.Module):
 
 
 class VideoSOD(nn.Module):
-    def __init__(self, nInputChannels, n_classes, os, img_backbone_type, hidden_dim, kernel_size, padding,
-                 num_layers, batch_first, bias, device):
+    def __init__(self, nInputChannels, n_classes, os, img_backbone_type, num_layers, batch_first, bias, device):
         super(VideoSOD, self).__init__()
 
         self.inplanes = 64
         self.os = os
-        self.hidden_dim = hidden_dim
-        self.kernel_size = kernel_size
-        self.padding = padding
+        self.hidden_dim = 32
+        self.kernel_size = 3
+        self.padding = [1, 2]
         self.num_layers = num_layers
         self.batch_first = batch_first
         self.bias = bias
+        self.dilation = [1, 2]
         self.device = device
 
         if os == 16:
@@ -101,19 +101,19 @@ class VideoSOD(nn.Module):
         lowOutputChannels = 48
 
         # low_level_features to 48 channels
-        self.conv2 = nn.Conv2d(lowInputChannels, lowOutputChannels, 1, bias=False)
-        self.bn2 = nn.BatchNorm2d(lowOutputChannels)
+        #self.conv2 = nn.Conv2d(lowInputChannels, lowOutputChannels, 1, bias=False)
+        #self.bn2 = nn.BatchNorm2d(lowOutputChannels)
 
         self.aspp = ASPP(asppInputChannels, asppOutputChannels, aspp_rates)
 
-        self.convLSTM = ConvLSTM(asppOutputChannels, self.hidden_dim, self.kernel_size, self.padding, self.num_layers,
-                                 self.batch_first, self.bias, self.device)
+        self.convLSTM1 = ConvLSTM(asppOutputChannels, self.hidden_dim, self.kernel_size, self.padding[0], self.num_layers,
+                                 self.batch_first, self.dilation[0], self.bias, self.device)
 
-        self.last_conv = nn.Sequential(
-            nn.Conv2d(self.hidden_dim + lowOutputChannels, 256, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
+        self.convLSTM2 = ConvLSTM(asppOutputChannels, self.hidden_dim, self.kernel_size, self.padding[1], self.num_layers,
+                                 self.batch_first, self.dilation[1], self.bias, self.device)
+
+        self.last_convs = nn.Sequential(
+            nn.Conv2d(2*self.hidden_dim, 256, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(256),
             nn.ReLU(),
             nn.Conv2d(256, n_classes, kernel_size=1, stride=1)
@@ -152,9 +152,9 @@ class VideoSOD(nn.Module):
             x = self.layer1(x)
             layer1_feat = x
             low_level_features = x
-            low_level_features = self.conv2(low_level_features)
-            low_level_features = self.bn2(low_level_features)
-            low_level_features_list.append(low_level_features)
+            #low_level_features = self.conv2(low_level_features)
+            #low_level_features = self.bn2(low_level_features)
+            #low_level_features_list.append(low_level_features)
 
 
             x = self.layer2(x)
@@ -174,23 +174,41 @@ class VideoSOD(nn.Module):
 
             img_features_list.append(aspp)
         x = torch.stack(img_features_list, dim=1)
-        x = self.convLSTM(x)
-        layer = len(x) - 1
-        x = x[layer]
+        convLSTM1_output = self.convLSTM1(x)
+        convLSTM2_output = self.convLSTM2(x)
+        layer_1 = len(convLSTM1_output) - 1
+        layer_2 = len(convLSTM2_output) - 1
+        x_1 = convLSTM1_output[layer_1]
+        x_2 = convLSTM2_output[layer_2]
 
-        stacked_list = []
+
+        convLSTM1_output_list1 = []
+        convLSTM2_output_list1 = []
+        convLSTM1_concat_list = []
+
+        #run through the first convLSTM
         for t in range(seq_len):
-            low_level_features = low_level_features_list[t]
-            convlstm_features = x[:, t, :, :, :]
-            convlstm_features = F.upsample(convlstm_features, low_level_features.size()[2:], mode='bilinear', align_corners=True)
-            stacked_features = torch.cat((convlstm_features, low_level_features), dim=1)
-            stacked_list.append(stacked_features)
-        x = torch.stack(stacked_list, dim=1)
+            #low_level_features = low_level_features_list[t]
+            convlstm_features = x_1[:, t, :, :, :]
+            #convlstm_features = F.upsample(convlstm_features, low_level_features.size()[2:], mode='bilinear', align_corners=True)
+            #stacked_features = torch.cat((convlstm_features, low_level_features), dim=1)
+            convLSTM1_output_list1.append(convlstm_features)
+
+        # run through the second convLSTM
+        for t in range(seq_len):
+            convlstm1_features = convLSTM1_output_list1[t]
+            convlstm_features = x_2[:, t, :, :, :]
+            #convlstm_features = F.upsample(convlstm_features, low_level_features.size()[2:], mode='bilinear', align_corners=True)
+            concat_features = torch.cat((convlstm_features, convlstm1_features), dim=1)
+            print("Shape of concat of both convLSTMs: {}".format(concat_features.shape))
+            convLSTM2_output_list1.append(concat_features)
+        x = torch.stack(convLSTM2_output_list1, dim=1)
+        print("Stacked both ConvLSTM outputs: {}".format(x.shape))
 
         saliency_maps = []
 
         for t in range(seq_len):
-            saliency = self.last_conv(x[:, t, :, :, :])
+            saliency = self.last_convs(x[:, t, :, :, :])
             saliency_maps.append(saliency)
         x = torch.stack(saliency_maps, dim=1)
         return x
