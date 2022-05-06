@@ -3,10 +3,9 @@ Part of this work is based on the [Motion Guided Attention](https://github.com/l
 
 ### Current status
 - Implemented a ConvLSTM
-- Implemented a VideoSOD network with a ConvLSTM
-- Trained network
+- Implemented a VideoSOD network with 2 ConvLSTMs with dilated convolutions
 
 ### TODO:
-- implement a second ConvLSTm with dilated convolutions into VideoSOD network
 - train new network
 - evaluate against MGA network
+- write thesis

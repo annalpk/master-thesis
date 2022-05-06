@@ -54,7 +54,6 @@ class ConvLSTM_Unit(nn.Module):
         i = torch.sigmoid(self.Wxi(input) + self.Whi(hidden_state))
         f = torch.sigmoid(self.Wxf(input) + self.Whf(hidden_state))
         o = torch.sigmoid(self.Wxo(input) + self.Who(hidden_state))
-        print(f.shape, current_state.shape)
         c = f * current_state + i * torch.tanh(self.Wxc(input) + self.Whc(hidden_state))
         h = o * torch.tanh(c)
         return h, c
@@ -88,7 +87,7 @@ class ConvLSTM(nn.Module):
 
         """
 
-    def __init__(self, input_dim, hidden_dim, kernel_size, padding, bidirectional, batch_first, dilation, bias, device):
+    def __init__(self, input_dim, hidden_dim, kernel_size, padding, bidirectional, dilation, bias, device):
         super(ConvLSTM, self).__init__()
 
         self.input_dim = input_dim
@@ -96,7 +95,6 @@ class ConvLSTM(nn.Module):
         self.kernel_size = kernel_size
         self.padding = padding
         self.bidirectional = bidirectional
-        self.batch_first = batch_first
         self.dilation = dilation
         self.bias = bias
         self.device = device
@@ -145,7 +143,6 @@ class ConvLSTM(nn.Module):
 
             if layer_idx > 0:
                 for t in reversed(range(seq_len)):
-                    print(t, "backward")
                     h, c = self.layer_list[layer_idx](input=forward_output[:, t, :, :, :], hidden_state=h, current_state=c)
                     backward_list.append(h)
                     backward_list.reverse()
@@ -153,12 +150,10 @@ class ConvLSTM(nn.Module):
 
                 for t in range(seq_len):
                     y = torch.tanh(self.Whf(forward_output[:, t, :, :, :]) + self.Whb(backward_output[:, t, :, :, :]))
-                    print(y.shape)
                     outputs.append(y)
                 output = torch.stack(outputs, dim=1)
             else:
                 for t in range(seq_len):  # loop for every step in the sequence
-                    print(t, "forward")
                     h, c = self.layer_list[layer_idx](input=current_input[:, t, :, :, :], hidden_state=h, current_state=c)
                     forward_list.append(h)
                 forward_output = torch.stack(forward_list, dim=1)

@@ -1,4 +1,6 @@
 src/results
+src/trainseq.pt
+weights
 .idea
 src/*.pth
 *.ipynb

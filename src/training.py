@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR, CyclicLR
 from model.videoseq import VideoSOD
 
 # Dataloaders includes
-from dataloaders import davis, fbms, visal, dutomron, duts, davisseq
+from dataloaders import davis, visal
 from dataloaders import image_transforms as trforms
 
 
@@ -44,6 +44,7 @@ def get_arguments():
     parser.add_argument('-save_dir', type=str, default='./results')
 
     parser.add_argument('-train_dataset', type=str, default='DAVIS-Seq', choices=['DAVIS-Seq', 'DAVIS-valset', 'FBMS', 'ViSal', 'DUTOMRON', 'DUTS'])
+    parser.add_argument('-data_dir', type=str, default='')
     parser.add_argument('-train_fold', type=str, default='/train')
 
     return parser.parse_args()
@@ -56,14 +57,22 @@ def softmax_2d(x):
 def main(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
-    net = VideoSOD(nInputChannels=3, n_classes=1, os=16, img_backbone_type='resnet101', hidden_dim=256, kernel_size=3, padding=1, num_layers=1, bias=False, device=device)
+    net = VideoSOD(nInputChannels=3, n_classes=1, os=16, img_backbone_type='resnet101', bidirectional=True, bias=False, device=device)
     net.to(device)
 
+    # set the appearance branch on not requiring grad, since we don't want to train it
+    for name, p in net.named_parameters():
+        p.requires_grad = False
+        if "convLSTM" in name:
+            p.requires_grad = True
+        if "last_convs" in name:
+            p.requires_grad = True
+    print("froze appearance branch tensors")
+
     loss_fn = nn.BCEWithLogitsLoss()
-    opt = torch.optim.SGD(net.convLSTM.parameters(), lr=0.0001, momentum=0.0005, weight_decay=0.9)
-    #scheduler = ReduceLROnPlateau(opt, mode='min', patience=5, factor=0.1, threshold=0.0001, verbose=True)
-    scheduler = CyclicLR(opt, base_lr=0.0001, max_lr=0.01, step_size_up=100, step_size_down=100)
-    #scheduler = StepLR(opt, step_size=100, gamma=0.1)
+    opt = torch.optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=0.0001, momentum=0.0005,
+                          weight_decay=0.9)
+    #scheduler = CyclicLR(opt, base_lr=0.00001, max_lr=0.01, step_size_up=100, step_size_down=100)
     scaler = GradScaler()
 
     epoch_start = -1
@@ -111,15 +120,10 @@ def main(args):
         print('loaded pre-trained weights and states')
         print("Current Learning rate: {}".format(opt.param_groups[0]['lr']))
 
-    # set the appearance branch on not requiring grad, since we don't want to train it
-    for name, p in net.named_parameters():
-        p.requires_grad = False
-        if "convLSTM" in name:
-            p.requires_grad = True
-        print(name, p.requires_grad)
-    print("froze appearance branch tensors")
-
     print("Starting Epoch = {}".format(epoch_start + 1))
+
+    for name, p in net.named_parameters():
+        print(name, p.requires_grad)
 
     composed_transforms_ts = transforms.Compose([
         trforms.FixedResize(size=(args.input_size, args.input_size)),
@@ -127,17 +131,11 @@ def main(args):
         trforms.ToTensor()])
 
     if args.train_dataset == 'DAVIS-Seq':
-        train_data = davisseq.DAVISSeq(dataset='train', transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
-        val_data = davisseq.DAVISSeq(dataset='val', transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
-    elif args.train_dataset == 'FBMS':
-        train_data = fbms.FBMS(dataset='train', transform=composed_transforms_ts, return_size=True)
+        train_data = davis.DAVIS(dataset='train', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
+        val_data = davis.DAVIS(dataset='val', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
     elif args.train_dataset == 'ViSal':
-        train_data = visal.ViSal(dataset='train', transform=composed_transforms_ts, return_size=True)
-    elif args.train_dataset == 'DUTOMRON':
-        train_data = dutomron.DUTOMRON(dataset='train', transform=composed_transforms_ts, return_size=True)
-    elif args.train_dataset == 'DUTS':
-        train_data = duts.DUTS(dataset='train', transform=composed_transforms_ts, return_size=True)
-        val_data = duts.DUTS(dataset='val', transform=composed_transforms_ts, return_size=True)
+        train_data = visal.ViSal(dataset='train', data_dir=args.data_dir, transform=composed_transforms_ts, return_size=True)
+
 
     #save_dir = args.save_dir + args.train_fold + '-' + args.model_name + '-' + args.train_dataset + '/saliency_map/'
     trainloader = DataLoader(train_data, args.batch_size, shuffle=False, num_workers=12)
@@ -147,6 +145,7 @@ def main(args):
 
     cnt = 0
     accmu_t = 0
+    gradient_accumulations = 16
 
     #gradient_accumulations = 16
     net.zero_grad()
@@ -157,8 +156,6 @@ def main(args):
         net.train()
         start_epoch = time.time()
         for i, sample_batched in enumerate(trainloader):
-            #print("progress {}/{}\n".format(i, num_iter_ts))
-
             before_t = time.time()
             inputs, labels, label_name, size = sample_batched['images'], sample_batched['labels'], sample_batched[
                 'label_name'], sample_batched['size']
@@ -181,17 +178,16 @@ def main(args):
                 pred_list.append(up_prob_pred)
             prob_pred = torch.stack(pred_list, dim=1)
             with autocast():
-                loss = loss_fn(prob_pred, labels)
+                loss = loss_fn(prob_pred, labels) / gradient_accumulations
             scaler.scale(loss).backward()
             running_loss += loss.item()
 
-            #if (i + 1) % gradient_accumulations == 0:
-            scaler.step(opt)
-            scaler.update()
-            scheduler.step()
-            #opt.step()
-            opt.zero_grad()
-            net.zero_grad()
+            if ((i + 1) % gradient_accumulations == 0) or (i +1 == len(trainloader)):
+                scaler.step(opt)
+                scaler.update()
+                #scheduler.step()
+                opt.zero_grad()
+                net.zero_grad()
         train_loss = running_loss / len(trainloader)
         train_losses.append(train_loss)
         print(print('Epoch [{}/{}], Loss: {:.6f}'.format(epoch + 1, args.epochs, train_loss)))
@@ -228,7 +224,7 @@ def main(args):
             'epoch': epoch,
             'net_state_dict': net.state_dict(),
             'opt_state_dict': opt.state_dict(),
-            'scheduler_state_dict': scheduler.state_dict(),
+            #'scheduler_state_dict': scheduler.state_dict(),
             'val_losses': val_losses,
             'train_losses': train_losses,
         }, 'trainseq.pt')

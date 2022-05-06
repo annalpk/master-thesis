@@ -14,8 +14,7 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
-from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
+
 
 # Custom includes
 from model.videoseq import VideoSOD
@@ -44,7 +43,7 @@ def get_arguments():
     parser.add_argument('-save_dir', type=str, default='./results')
 
     parser.add_argument('-test_dataset', type=str, default='DAVIS-Seq', choices=['DAVIS-Seq', 'DAVIS-valset', 'FBMS', 'ViSal', 'DUTOMRON', 'DUTS'])
-    parser.add_argument('-data_dir', type=str, default=None)
+    parser.add_argument('-data_dir', type=str, default='')
     parser.add_argument('-test_fold'      , type=str  , default='/test')
 
     return parser.parse_args()
@@ -57,7 +56,7 @@ def softmax_2d(x):
 def main(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
-    net = VideoSOD(nInputChannels=3, n_classes=1, os=16, img_backbone_type='resnet101', hidden_dim=256, kernel_size=3, padding=1, num_layers=1, bias=False, device=device)
+    net = VideoSOD(nInputChannels=3, n_classes=1, os=16, img_backbone_type='resnet101', bidirectional=True, bias=False, device=device)
     net.to(device)
 
     loss_fn = nn.L1Loss()
@@ -106,7 +105,7 @@ def main(args):
     if args.test_dataset == 'DAVIS-Seq':
         test_data = davis.DAVIS(dataset='val', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
     elif args.train_dataset == 'ViSal':
-        test_data = visal.ViSal(dataset='val', transform=composed_transforms_ts, return_size=True)
+        test_data = visal.ViSal(dataset='val', data_dir=args.data_dir, transform=composed_transforms_ts, return_size=True)
 
     save_dir = args.save_dir + args.test_fold + '-' + args.model_name + '-' + args.test_dataset + '/saliency_map/'
     testloader = DataLoader(test_data, args.batch_size, shuffle=False, num_workers=12)

@@ -47,7 +47,7 @@ class Bottleneck(nn.Module):
 
 
 class VideoSOD(nn.Module):
-    def __init__(self, nInputChannels, n_classes, os, img_backbone_type, bidirectional, batch_first, bias, device):
+    def __init__(self, nInputChannels, n_classes, os, img_backbone_type, bidirectional, bias, device):
         super(VideoSOD, self).__init__()
 
         self.inplanes = 64
@@ -56,7 +56,6 @@ class VideoSOD(nn.Module):
         self.kernel_size = 3
         self.padding = [1, 2]
         self.bidirectional = bidirectional
-        self.batch_first = batch_first
         self.bias = bias
         self.dilation = [1, 2]
         self.device = device
@@ -106,11 +105,9 @@ class VideoSOD(nn.Module):
 
         self.aspp = ASPP(asppInputChannels, asppOutputChannels, aspp_rates)
 
-        self.convLSTM1 = ConvLSTM(asppOutputChannels, self.hidden_dim, self.kernel_size, self.padding[0], self.bidirectional,
-                                 self.batch_first, self.dilation[0], self.bias, self.device)
+        self.convLSTM1 = ConvLSTM(asppOutputChannels, self.hidden_dim, self.kernel_size, self.padding[0], self.bidirectional, self.dilation[0], self.bias, self.device)
 
-        self.convLSTM2 = ConvLSTM(asppOutputChannels, self.hidden_dim, self.kernel_size, self.padding[1], self.bidirectional,
-                                 self.batch_first, self.dilation[1], self.bias, self.device)
+        self.convLSTM2 = ConvLSTM(asppOutputChannels, self.hidden_dim, self.kernel_size, self.padding[1], self.bidirectional, self.dilation[1], self.bias, self.device)
 
         self.last_convs = nn.Sequential(
             nn.Conv2d(2*self.hidden_dim, 256, kernel_size=3, stride=1, padding=1, bias=False),
@@ -177,21 +174,12 @@ class VideoSOD(nn.Module):
         convLSTM1_output = self.convLSTM1(x)
         convLSTM2_output = self.convLSTM2(x)
 
-
-
-        convLSTM1_output_list1 = []
         convLSTM_concat_list = []
 
-        #run through the first convLSTM
         for t in range(seq_len):
-            convlstm_features = convLSTM1_output[:, t, :, :, :]
-            convLSTM1_output_list1.append(convlstm_features)
-
-        # run through the second convLSTM
-        for t in range(seq_len):
-            convlstm1_features = convLSTM1_output_list1[t]
-            convlstm_features = convLSTM2_output[:, t, :, :, :]
-            concat_features = torch.cat((convlstm_features, convlstm1_features), dim=1)
+            convlstm1_features = convLSTM1_output[:, t, :, :, :]
+            convlstm2_features = convLSTM2_output[:, t, :, :, :]
+            concat_features = torch.cat((convlstm1_features, convlstm2_features), dim=1)
             convLSTM_concat_list.append(concat_features)
         x = torch.stack(convLSTM_concat_list, dim=1)
 
