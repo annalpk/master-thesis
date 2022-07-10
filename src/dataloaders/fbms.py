@@ -9,17 +9,15 @@ import random
 
 from . import image_transforms as trforms
 
-class DAVIS(data.Dataset):
+class FBMS(data.Dataset):
     def __init__(self, dataset='train', data_dir=None, transform=None, seq_len=None, return_size=False):
         self.return_size = return_size
         self.data_dir = data_dir
         self.dataset=dataset
         if self.dataset == 'train':
-            imgset_path = self.data_dir + '/ImageSets/480p/train-seq.txt'
-        elif self.dataset == 'overfit':
-            imgset_path = self.data_dir + '/ImageSets/480p/overfit.txt'
+            imgset_path = self.data_dir + '/trainset.txt'
         else:
-            imgset_path = self.data_dir + '/ImageSets/480p/val-seq.txt'
+            imgset_path = self.data_dir + '/valset.txt'
         imgset_file = open(imgset_path)
         all_of_it = imgset_file.read()
         self.seq_paths = all_of_it.split("\n\n")[:-1]
@@ -28,7 +26,6 @@ class DAVIS(data.Dataset):
         for x in range(len(self.seq_paths)):
             paths = self.seq_paths[x].split("\n")
             self.folder_paths_list.append(paths)
-
 
         #if no sequence legth is given, the max sequence length from all sequences is found and used
         if seq_len == None:
@@ -44,10 +41,6 @@ class DAVIS(data.Dataset):
         labels_path = []
         self.sequence_img_paths = []
         self.sequence_label_paths = []
-
-        if self.dataset == 'train':
-            self.sample_videos(self.sequence_img_paths, self.sequence_label_paths)
-
         counter = 0
         for x in range(len(self.folder_paths_list)):
             for y in range(len(self.folder_paths_list[x])):
@@ -118,11 +111,12 @@ class DAVIS(data.Dataset):
             imags.append(img)
             labels.append(lab)
 
-            pos_list = [i.start() for i in re.finditer('/', label_path)]
-            label_name = label_path[pos_list[-2] + 1:]
-            point_list = [i.start() for i in re.finditer('\.', label_path)]
+            pos_list = [i.start() for i in re.finditer('/', image_path)]
+            label_name = image_path[pos_list[-2] + 1:]
+            point_list = [i.start() for i in re.finditer('\.', label_name)]
+            under_list = [i.start() for i in re.finditer('_', label_name)]
             self.folder = label_name[:label_name.rfind("/")]
-            self.number = int(label_path[pos_list[-1] + 1:point_list[0]])
+            self.number = int(label_name[under_list[0] + 1:point_list[0]])
             label_names.append(label_name)
             c, h, w = sample['image'].shape
             counter += 1
@@ -154,33 +148,6 @@ class DAVIS(data.Dataset):
                 max_number = len(self.sequence_img_paths[x])
 
         return max_number
-
-    def sample_videos(self, sequence_img_paths, sequence_label_paths):
-        images_path = []
-        labels_path = []
-        for x in range(len(self.folder_paths_list)):
-            for y in range(len(self.folder_paths_list[x])):
-                if (y % 20 == 0):
-                    for sample in range(3, 6):
-                        last_frame = y + (sample * self.seq_len) - 1
-                        if (last_frame < len(self.folder_paths_list[x])):
-                            splitted = self.folder_paths_list[x][y].split(" ")
-                            img_path = splitted[0]
-                            gt_path = splitted[1]
-                            images_path.append(img_path)
-                            labels_path.append(gt_path)
-                            frame = y
-                            for num in range(self.seq_len - 1):
-                                frame += sample
-                                splitted = self.folder_paths_list[x][frame].split(" ")
-                                img_path = splitted[0]
-                                gt_path = splitted[1]
-                                images_path.append(img_path)
-                                labels_path.append(gt_path)
-                            sequence_img_paths.append(images_path)
-                            sequence_label_paths.append(labels_path)
-                            images_path = []
-                            labels_path = []
 
     def getZeroElements(self, shape, size, label_name):
         image = torch.zeros(shape)

@@ -34,17 +34,19 @@ def get_arguments():
     ## Model settings
     parser.add_argument('-model_name', type=str, default='VideoSOD')
     parser.add_argument('-num_classes', type=int, default=1)
-    parser.add_argument('-input_size', type=int, default=512)
+    parser.add_argument('-input_size', type=int, default=416)
     parser.add_argument('-output_stride', type=int, default=16)
     parser.add_argument('-seq_len', type=int, default=4)
 
     ## Visualization settings
-    parser.add_argument('-load_path', type=str, default=None)
+    parser.add_argument('-load_path', type=str, default='path/to/weights')
     parser.add_argument('-save_dir', type=str, default='./results')
 
+    parser.add_argument('-save_mask', type=bool, default=True)
+
     parser.add_argument('-test_dataset', type=str, default='DAVIS-Seq', choices=['DAVIS-Seq', 'DAVIS-valset', 'FBMS', 'ViSal', 'DUTOMRON', 'DUTS'])
-    parser.add_argument('-data_dir', type=str, default='')
-    parser.add_argument('-test_fold'      , type=str  , default='/test')
+    parser.add_argument('-data_dir', type=str, default='/Datasets/DAVIS-data/DAVIS')
+    parser.add_argument('-test_fold'      , type=str  , default='/val')
 
     return parser.parse_args()
 
@@ -62,14 +64,15 @@ def main(args):
     loss_fn = nn.L1Loss()
     val_losses = []
 
-    if args.load_path is None:
     # load pre-trained Appearance network weights
+    if args.load_path is None:
         pretrain_weights = torch.load("MGA_trained.pth")
         pretrain_keys = list(pretrain_weights.keys())
-        #pretrain_keys = [key for key in pretrain_keys if not key.endswith('num_batches_tracked')]
+        # pretrain_keys = [key for key in pretrain_keys if not key.endswith('num_batches_tracked')]
         net_keys = list(net.state_dict().keys())
 
         for key in net_keys:
+
             # key_ = 'module.' + key
             key_ = key
             if key_ in pretrain_keys:
@@ -78,10 +81,11 @@ def main(args):
             else:
                 print('missing key: ', key_)
         print('loaded pre-trained weights.')
-
+    epoch_start = 0
     # load pre-trained weights
     if args.load_path is not None:
         checkpoint = torch.load(args.load_path)
+        epoch_start = checkpoint['epoch']
         pretrain_weights = checkpoint['net_state_dict']
         pretrain_keys = list(pretrain_weights.keys())
         pretrain_keys = [key for key in pretrain_keys]
@@ -96,6 +100,8 @@ def main(args):
             else:
                 print('missing key: ', key_)
         print('loaded pre-trained weights and states')
+    print(epoch_start)
+
 
     composed_transforms_ts = transforms.Compose([
         trforms.FixedResize(size=(args.input_size, args.input_size)),
@@ -148,21 +154,29 @@ def main(args):
                 up_prob_pred = F.upsample(prob_pred[:, t, :, :, :], size=size_shape, mode='bilinear', align_corners=True)
                 save_list.append(up_prob_pred)
             prob_pred = torch.stack(pred_list, dim=1)
-            save_pred = torch.stack(save_list, dim=1)
+            save_pred = torch.stack(save_list, dim=1).cpu().numpy()
             loss = loss_fn(prob_pred, labels)
             overall_loss += loss
 
+            pred = prob_pred.cpu().data.numpy()
+            label_data = labels.cpu().data.numpy()
+            pred[pred > 0.5] = 1
+            pred[pred <= 0.5]= 0
+            #inputs_data = inputs.cpu().data.numpy()
+
             # accuracy
-            batch_total_pixel = labels.nelement()
+            batch_total_pixel = label_data.size
             total_pixel += batch_total_pixel
-            batch_correct_pixel = prob_pred.eq(labels).sum().item()
+            batch_correct_pixel = np.equal(pred, label_data).sum()
             correct_pixel += batch_correct_pixel
             accuracy = 100 * batch_correct_pixel / batch_total_pixel
             sum_accuracy += accuracy
 
-            sequence_data = save_pred[0].cpu()
+            #save_pred[save_pred > 0.5] = 1
+            #save_pred[save_pred <= 0.5] = 0
+            sequence_data = save_pred[0]
             for t in range(args.seq_len):
-                save_png = sequence_data[t][0].numpy()
+                save_png = sequence_data[t][0]
                 save_png = np.round(save_png * 255)
                 save_png = save_png.astype(np.uint8)
                 save_png = Image.fromarray(save_png)
@@ -170,6 +184,12 @@ def main(args):
                 if not os.path.exists(save_path[:save_path.rfind('/')]):
                     os.makedirs(save_path[:save_path.rfind('/')])
                 save_png.save(save_path, format="png")
+
+            if args.save_mask:
+                for t in range(args.seq_len):
+                    mask_png = label_data[0][t][0]
+
+
 
             # print out results
             print("Loss: {}".format(loss))

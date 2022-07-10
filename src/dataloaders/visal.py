@@ -11,7 +11,7 @@ class ViSal(data.Dataset):
     def __init__(self, dataset='test', data_dir=None, transform=None, seq_len=None, return_size=False):
         self.return_size = return_size
         self.data_dir = data_dir
-        imgset_path = self.data_dir + '/ViSal-imgset.txt'
+        imgset_path = self.data_dir + '/imgset.txt'
         imgset_file = open(imgset_path)
         all_of_it = imgset_file.read()
         self.seq_paths = all_of_it.split("\n\n")[:-1]

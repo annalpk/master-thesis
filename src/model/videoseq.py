@@ -96,12 +96,8 @@ class VideoSOD(nn.Module):
 
         asppInputChannels = 2048
         asppOutputChannels = 256
-        lowInputChannels =  256
+        lowInputChannels = 256
         lowOutputChannels = 48
-
-        # low_level_features to 48 channels
-        #self.conv2 = nn.Conv2d(lowInputChannels, lowOutputChannels, 1, bias=False)
-        #self.bn2 = nn.BatchNorm2d(lowOutputChannels)
 
         self.aspp = ASPP(asppInputChannels, asppOutputChannels, aspp_rates)
 
@@ -109,12 +105,26 @@ class VideoSOD(nn.Module):
 
         self.convLSTM2 = ConvLSTM(asppOutputChannels, self.hidden_dim, self.kernel_size, self.padding[1], self.bidirectional, self.dilation[1], self.bias, self.device)
 
-        self.last_convs = nn.Sequential(
-            nn.Conv2d(2*self.hidden_dim, 256, kernel_size=3, stride=1, padding=1, bias=False),
+        self.concat_conv = nn.Sequential(
+            nn.Conv2d(asppOutputChannels + lowOutputChannels, 256, kernel_size=3, stride=1, padding=1, bias=False),
             nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.Conv2d(256, n_classes, kernel_size=1, stride=1)
+            nn.ReLU()
         )
+
+        #self.last_conv = nn.Sequential(
+        #    nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
+        #    nn.BatchNorm2d(256),
+        #    nn.ReLU(),
+        #    nn.Conv2d(256, n_classes, kernel_size=1, stride=1)
+        #)
+
+        self.end_conv = nn.Conv2d(2*self.hidden_dim, n_classes, kernel_size=1, stride=1)
+        nn.init.xavier_uniform_(self.end_conv.weight, gain=1.0)
+
+        # low_level_features to 48 channels
+        self.conv2 = nn.Conv2d(lowInputChannels, lowOutputChannels, 1, bias=False)
+        self.bn2 = nn.BatchNorm2d(lowOutputChannels)
+
 
     def _make_layer(self, planes, blocks, stride=1, rate=1):
 
@@ -143,33 +153,37 @@ class VideoSOD(nn.Module):
             x = self.conv1(img)
             x = self.bn1(x)
             x = self.relu(x)
-            conv1_feat = x
+            #conv1_feat = x
 
             x = self.maxpool(x)
             x = self.layer1(x)
-            layer1_feat = x
+            #layer1_feat = x
             low_level_features = x
-            #low_level_features = self.conv2(low_level_features)
-            #low_level_features = self.bn2(low_level_features)
-            #low_level_features_list.append(low_level_features)
+            low_level_features = self.conv2(low_level_features)
+            low_level_features = self.bn2(low_level_features)
+            low_level_features_list.append(low_level_features)
 
 
             x = self.layer2(x)
-            layer2_feat = x
+            #layer2_feat = x
 
             x = self.layer3(x)
-            layer3_feat = x
+            #layer3_feat = x
 
             x = self.layer4(x)
             layer4_feat = x
+            #print("Last layer size: {}".format(layer4_feat.shape))
 
             if self.os == 32:
                 x = F.upsample(x, scale_factor=4, mode='bilinear', align_corners=True)
 
             aspp = self.aspp(x)
-            # img_feat_lst.append(x)
+            x = F.upsample(aspp, low_level_features.size()[2:], mode='bilinear', align_corners=True)
+            x = torch.cat((x, low_level_features), dim=1)
+            x = self.concat_conv(x)
 
-            img_features_list.append(aspp)
+            img_features_list.append(x)
+        low_level_features_stack = torch.stack(low_level_features_list, dim=1)
         x = torch.stack(img_features_list, dim=1)
         convLSTM1_output = self.convLSTM1(x)
         convLSTM2_output = self.convLSTM2(x)
@@ -186,7 +200,7 @@ class VideoSOD(nn.Module):
         saliency_maps = []
 
         for t in range(seq_len):
-            saliency = self.last_convs(x[:, t, :, :, :])
+            saliency = self.end_conv(x[:, t, :, :, :])
             saliency_maps.append(saliency)
         x = torch.stack(saliency_maps, dim=1)
         return x

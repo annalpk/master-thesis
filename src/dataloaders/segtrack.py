@@ -9,17 +9,12 @@ import random
 
 from . import image_transforms as trforms
 
-class DAVIS(data.Dataset):
+class SegTrack(data.Dataset):
     def __init__(self, dataset='train', data_dir=None, transform=None, seq_len=None, return_size=False):
         self.return_size = return_size
         self.data_dir = data_dir
         self.dataset=dataset
-        if self.dataset == 'train':
-            imgset_path = self.data_dir + '/ImageSets/480p/train-seq.txt'
-        elif self.dataset == 'overfit':
-            imgset_path = self.data_dir + '/ImageSets/480p/overfit.txt'
-        else:
-            imgset_path = self.data_dir + '/ImageSets/480p/val-seq.txt'
+        imgset_path = self.data_dir + '/ImageSets/train.txt'
         imgset_file = open(imgset_path)
         all_of_it = imgset_file.read()
         self.seq_paths = all_of_it.split("\n\n")[:-1]
@@ -97,6 +92,7 @@ class DAVIS(data.Dataset):
 
             image = Image.open(image_path).convert('RGB')
             label = np.array(Image.open(label_path))
+            label = label[:, :, 0]
             if label.max() > 0:
                 label = label / label.max()
 
@@ -120,23 +116,8 @@ class DAVIS(data.Dataset):
 
             pos_list = [i.start() for i in re.finditer('/', label_path)]
             label_name = label_path[pos_list[-2] + 1:]
-            point_list = [i.start() for i in re.finditer('\.', label_path)]
-            self.folder = label_name[:label_name.rfind("/")]
-            self.number = int(label_path[pos_list[-1] + 1:point_list[0]])
             label_names.append(label_name)
             c, h, w = sample['image'].shape
-            counter += 1
-            index = x
-        if (counter >= len(self.sequence_img_paths[item]) and counter < self.seq_len):
-            size = torch.tensor(size)
-            for x in range(counter, self.seq_len):
-                label_name = self.folder + "/{:05d}".format(self.number + x)
-                image = imags[index]
-                imags.append(image)
-                label = labels[index]
-                labels.append(label)
-                sizes.append(size)
-                label_names.append(label_name)
         imags = torch.stack(imags)
         labels = torch.stack(labels)
 

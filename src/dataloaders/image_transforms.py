@@ -66,10 +66,10 @@ class CenterCrop(object):
 
 
 class RandomHorizontalFlip(object):
-    def __call__(self, sample):
+    def __call__(self, sample, flip):
         img = sample['image']
         mask = sample['label']
-        if random.random() < 0.5:
+        if flip < 0.5:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
             mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
 

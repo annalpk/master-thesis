@@ -1,25 +1,24 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-"""
-    ConvLSTM unit
-
-    Parameters:
-        input_dim: int
-            Number of channels of input tensor
-        hidden_dim: int
-            Number of channels of the hidden state, also the number of channels of the convolution output
-        kernel_size: int
-            Size of the convolutional kernel
-        padding: int
-            adds padding to the convolution
-        bias: bool
-            Should the bias be added or not
-        """
 
 
 class ConvLSTM_Unit(nn.Module):
+    """
+        Creates a ConvLSTM unit
+
+        Parameters:
+            input_dim: int
+                Number of channels of input tensor
+            hidden_dim: int
+                Number of channels of the hidden state, also the number of channels of the convolution output
+            kernel_size: int
+                Size of the convolutional kernel
+            padding: int
+                adds padding to the convolution
+            bias: bool
+                Should the bias be added or not
+            """
     def __init__(self, input_dim, hidden_dim, kernel_size, padding, dilation, bias):
         super(ConvLSTM_Unit, self).__init__()
 
@@ -49,6 +48,16 @@ class ConvLSTM_Unit(nn.Module):
                              padding=self.padding, dilation=self.dilation, bias=self.bias)
         self.Whc = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
                              padding=self.padding, dilation=self.dilation, bias=self.bias)
+
+        nn.init.xavier_uniform_(self.Wxi.weight)
+        nn.init.xavier_uniform_(self.Whi.weight)
+        nn.init.xavier_uniform_(self.Wxf.weight)
+        nn.init.xavier_uniform_(self.Whf.weight)
+        nn.init.xavier_uniform_(self.Wxo.weight)
+        nn.init.xavier_uniform_(self.Who.weight)
+        nn.init.xavier_uniform_(self.Wxc.weight, gain=5/3)
+        nn.init.xavier_uniform_(self.Whc.weight, gain=5/3)
+
 
     def forward(self, input, hidden_state, current_state):
         i = torch.sigmoid(self.Wxi(input) + self.Whi(hidden_state))
@@ -106,18 +115,22 @@ class ConvLSTM(nn.Module):
         layer_list = []
 
         for i in range(0, self.num_layers):
-            current_input_dim = self.input_dim if i == 0 else self.hidden_dim
+            #current_input_dim = self.input_dim if i == 0 else self.hidden_dim
 
             layer_list.append(
-                ConvLSTM_Unit(input_dim=current_input_dim, hidden_dim=self.hidden_dim, kernel_size=self.kernel_size, padding=self.padding, dilation=self.dilation,
+                ConvLSTM_Unit(input_dim=self.input_dim, hidden_dim=self.hidden_dim, kernel_size=self.kernel_size, padding=self.padding, dilation=self.dilation,
                               bias=self.bias))
 
         self.layer_list = nn.ModuleList(layer_list)
 
-        self.Whf = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
+        if self.bidirectional:
+            self.Whf = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
                              padding=self.padding, dilation=self.dilation, bias=self.bias)
-        self.Whb = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
+            self.Whb = nn.Conv2d(in_channels=self.hidden_dim, out_channels=self.hidden_dim, kernel_size=self.kernel_size,
                              padding=self.padding, dilation=self.dilation, bias=self.bias)
+
+            nn.init.xavier_uniform_(self.Whf.weight, gain=5 / 3)
+            nn.init.xavier_uniform_(self.Whb.weight, gain=5 / 3)
 
     def forward(self, input, hidden_state=None):
         """Parameters:
@@ -143,7 +156,7 @@ class ConvLSTM(nn.Module):
 
             if layer_idx > 0:
                 for t in reversed(range(seq_len)):
-                    h, c = self.layer_list[layer_idx](input=forward_output[:, t, :, :, :], hidden_state=h, current_state=c)
+                    h, c = self.layer_list[layer_idx](input=current_input[:, t, :, :, :], hidden_state=h, current_state=c)
                     backward_list.append(h)
                     backward_list.reverse()
                     backward_output = torch.stack(backward_list, dim=1)

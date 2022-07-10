@@ -1,5 +1,11 @@
 src/results
 src/trainseq.pt
+src/weights
+src/*.pt
+src/*.ipynb
+src/model/ImgNetwork.py
+src/dataloaders/duts.py
+src/*.zip
 weights
 .idea
 src/*.pth
