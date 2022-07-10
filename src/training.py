@@ -1,27 +1,20 @@
 import argparse
-from datetime import datetime
-import time
-import glob
-import os
-from PIL import Image
-import numpy as np
 import time
 
 # PyTorch includes
 import torch
-from torch.autograd import Variable
 from torchvision import transforms
 from torch.utils.data import DataLoader, ConcatDataset
 import torch.nn.functional as F
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
+#from torch.cuda.amp import GradScaler, autocast
 
 # Custom includes
 from model.videoseq import VideoSOD
 from earlystopping import EarlyStopping
 
 # Dataloaders includes
-from dataloaders import davis, visal, duts, fbms, segtrack
+from dataloaders import davis, fbms, segtrack
 from dataloaders import image_transforms as trforms
 
 
@@ -46,8 +39,8 @@ def get_arguments():
     parser.add_argument('-load_path', type=str, default=None)
     parser.add_argument('-save_dir', type=str, default='./results')
 
-    parser.add_argument('-train_dataset', type=str, default='Concat', choices=['DAVIS-Seq', 'DAVIS-valset', 'FBMS', 'ViSal', 'DUTOMRON', 'Concat'])
-    parser.add_argument('-data_dir', type=str, default='/Datasets/DAVIS-data/DAVIS')
+    parser.add_argument('-train_dataset', type=str, default='Concat', choices=['DAVIS-Seq', 'DAVIS-valset', 'FBMS', 'DUTOMRON', 'Concat'])
+    parser.add_argument('-data_dir', type=str, default='./Datasets/DAVIS-data/DAVIS')
     parser.add_argument('-train_fold', type=str, default='/train')
     parser.add_argument('-save_weights', type=str, default='weights.pt')
 
@@ -89,7 +82,7 @@ def main(args):
     loss_fn = nn.BCEWithLogitsLoss()
     opt = torch.optim.SGD(filter(lambda p: p.requires_grad, net.parameters()), lr=1e-3, momentum=0.9,
                           weight_decay=0.0005)
-    scaler = GradScaler()
+    #scaler = GradScaler()
 
     epoch_start = -1
     train_losses = []
@@ -162,11 +155,6 @@ def main(args):
         print("DAVIS dataset")
         train_data = davis.DAVIS(dataset='train', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
         val_data = davis.DAVIS(dataset='val', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
-    elif args.train_dataset == 'ViSal':
-        train_data = visal.ViSal(dataset='train', data_dir=args.data_dir, transform=composed_transforms_ts, return_size=True)
-    elif args.train_dataset == 'Duts':
-        print("DUTS dataset")
-        train_data = duts.DUTOMRON(dataset='train', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
     elif args.train_dataset == 'FBMS':
         print("FBMS dataset")
         train_data = fbms.FBMS(dataset='train', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
@@ -174,8 +162,8 @@ def main(args):
         print("DAVIS + FBMS + SegTrackV2 dataset")
         davis_data = davis.DAVIS(dataset='train', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
         val_data = davis.DAVIS(dataset='val', data_dir=args.data_dir, transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
-        fbms_data = fbms.FBMS(dataset='train', data_dir='/Datasets/FBMS_Trainingset', transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
-        segtrack_data = segtrack.SegTrack(dataset='train', data_dir='/Datasets/SegTrackv2', transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
+        fbms_data = fbms.FBMS(dataset='train', data_dir='./Datasets/FBMS_Trainingset', transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
+        segtrack_data = segtrack.SegTrack(dataset='train', data_dir='./Datasets/SegTrackv2', transform=composed_transforms_ts, seq_len=args.seq_len, return_size=True)
         train_data = ConcatDataset([davis_data,fbms_data,segtrack_data])
 
 
@@ -187,7 +175,7 @@ def main(args):
 
     cnt = 0
     accmu_t = 0
-    gradient_accumulations = 16
+    #gradient_accumulations = 16
 
     net.zero_grad()
     start_training = time.time()
@@ -208,8 +196,9 @@ def main(args):
             inputs = inputs.to(device)
             labels = labels.to(device)
 
-            with autocast():
-                prob_pred = net(inputs)
+            #with autocast():
+            #    prob_pred = net(inputs)
+            prob_pred = net(inputs)
             accmu_t += (time.time() - before_t)
             cnt += 1
 
@@ -220,21 +209,24 @@ def main(args):
                 up_prob_pred = F.upsample(prob_pred[:, t, :, :, :], size=shape, mode='bilinear', align_corners=True)
                 pred_list.append(up_prob_pred)
             prob_pred = torch.stack(pred_list, dim=1)
-            with autocast():
-                loss = loss_fn(prob_pred, labels) / gradient_accumulations
-            scaler.scale(loss).backward()
+            #with autocast():
+            #    loss = loss_fn(prob_pred, labels) / gradient_accumulations
+            loss = loss_fn(prob_pred, labels)
+            #scaler.scale(loss).backward()
+            loss.backward()
             batch_loss += loss.item()
 
-            if ((i + 1) % gradient_accumulations == 0) or (i +1 == len(trainloader)):
-                running_loss += batch_loss
-                batch_loss = 0.0
-                scaler.step(opt)
-                scaler.update()
-                #scheduler.step()
-                opt.zero_grad()
-                net.zero_grad()
+            #if ((i + 1) % gradient_accumulations == 0) or (i +1 == len(trainloader)):
+            running_loss += batch_loss
+            batch_loss = 0.0
+                #scaler.step(opt)
+                #scaler.update()
+            opt.step()
+            opt.zero_grad()
+            net.zero_grad()
 
-        train_loss = running_loss / (len(trainloader) / gradient_accumulations)
+        #train_loss = running_loss / (len(trainloader) / gradient_accumulations)
+        train_loss = running_loss / len(trainloader)
         train_losses.append(train_loss)
         print(print('Epoch [{}/{}], Loss: {:.6f}'.format(epoch + 1, args.epochs, train_loss)))
         end_epoch = time.time()
@@ -259,14 +251,16 @@ def main(args):
                     up_prob_pred = F.interpolate(prob_pred[:, t, :, :, :], size=shape, mode='bilinear', align_corners=True)
                     pred_list.append(up_prob_pred)
                 prob_pred = torch.stack(pred_list, dim=1)
-                loss = (loss_fn(prob_pred, labels) / gradient_accumulations).item()
+                #loss = (loss_fn(prob_pred, labels) / gradient_accumulations).item()
+                loss = loss_fn(prob_pred, labels).item()
                 val_batch_loss += loss
 
-                if ((i + 1) % gradient_accumulations == 0) or (i + 1 == len(valloader)):
-                    running_val_loss += val_batch_loss
-                    val_batch_loss = 0.0
+                #if ((i + 1) % gradient_accumulations == 0) or (i + 1 == len(valloader)):
+                running_val_loss += val_batch_loss
+                val_batch_loss = 0.0
 
-        val_loss = running_val_loss / (len(valloader) / gradient_accumulations)
+        #val_loss = running_val_loss / (len(valloader) / gradient_accumulations)
+        val_loss = running_val_loss / len(valloader)
         val_losses.append(val_loss)
         print(print('Epoch [{}/{}], Val-loss: {:.7f}'.format(epoch + 1, args.epochs, val_loss)))
 
@@ -280,7 +274,7 @@ def main(args):
                 'val_losses': val_losses,
                 'train_losses': train_losses,
                 'best_score': best_score
-            }, 'best_' + args.save_path)
+            }, 'best_' + args.save_weights)
             print("Saved best Score")
         elif best_score >= val_loss:
             print("New best score")
@@ -292,7 +286,7 @@ def main(args):
                 'val_losses': val_losses,
                 'train_losses': train_losses,
                 'best_score': best_score
-            }, 'best_' + args.save_path)
+            }, 'best_' + args.save_weights)
             #pat_count = 0
             print("Saved best Score")
 
@@ -304,7 +298,7 @@ def main(args):
             'val_losses': val_losses,
             'train_losses': train_losses,
             'best_score': best_score
-        }, args.save_path)
+        }, args.save_weights)
         print('Checkpoint saved')
 
     end_training = time.time()

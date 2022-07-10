@@ -45,7 +45,7 @@ def get_arguments():
     parser.add_argument('-save_mask', type=bool, default=True)
 
     parser.add_argument('-test_dataset', type=str, default='DAVIS-Seq', choices=['DAVIS-Seq', 'DAVIS-valset', 'FBMS', 'ViSal', 'DUTOMRON', 'DUTS'])
-    parser.add_argument('-data_dir', type=str, default='/Datasets/DAVIS-data/DAVIS')
+    parser.add_argument('-data_dir', type=str, default='./Datasets/DAVIS-data/DAVIS')
     parser.add_argument('-test_fold'      , type=str  , default='/val')
 
     return parser.parse_args()

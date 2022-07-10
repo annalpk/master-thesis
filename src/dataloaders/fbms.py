@@ -113,24 +113,9 @@ class FBMS(data.Dataset):
 
             pos_list = [i.start() for i in re.finditer('/', image_path)]
             label_name = image_path[pos_list[-2] + 1:]
-            point_list = [i.start() for i in re.finditer('\.', label_name)]
-            under_list = [i.start() for i in re.finditer('_', label_name)]
-            self.folder = label_name[:label_name.rfind("/")]
-            self.number = int(label_name[under_list[0] + 1:point_list[0]])
             label_names.append(label_name)
             c, h, w = sample['image'].shape
-            counter += 1
-            index = x
-        if (counter >= len(self.sequence_img_paths[item]) and counter < self.seq_len):
-            size = torch.tensor(size)
-            for x in range(counter, self.seq_len):
-                label_name = self.folder + "/{:05d}".format(self.number + x)
-                image = imags[index]
-                imags.append(image)
-                label = labels[index]
-                labels.append(label)
-                sizes.append(size)
-                label_names.append(label_name)
+
         imags = torch.stack(imags)
         labels = torch.stack(labels)
 
